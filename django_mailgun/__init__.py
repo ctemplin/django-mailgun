@@ -2,6 +2,7 @@ import requests
 from django.conf import settings
 from django.core.mail.backends.base import BaseEmailBackend
 from django.core.mail.message import sanitize_address
+import re
 
 try:
     from cStringIO import StringIO
@@ -21,6 +22,8 @@ class MailgunBackend(BaseEmailBackend):
     def __init__(self, fail_silently=False, *args, **kwargs):
         access_key, server_name = (kwargs.pop('access_key', None),
                                    kwargs.pop('server_name', None))
+
+        strip_message_id = kwargs.pop('strip_message_id', False)
     
         super(MailgunBackend, self).__init__(
                         fail_silently=fail_silently, 
@@ -29,6 +32,7 @@ class MailgunBackend(BaseEmailBackend):
         try:
             self._access_key = access_key or getattr(settings, 'MAILGUN_ACCESS_KEY')
             self._server_name = server_name or getattr(settings, 'MAILGUN_SERVER_NAME')
+            self._strip_message_id = strip_message_id or getattr(settings, 'MAILGUN_STRIP_MESSAGE_ID')
         except AttributeError:
             if fail_silently:
                 self._access_key, self._server_name = None, None
@@ -55,6 +59,11 @@ class MailgunBackend(BaseEmailBackend):
         recipients = [sanitize_address(addr, email_message.encoding)
                       for addr in email_message.recipients()]
 
+        message_string = email_message.message().as_string()
+
+        if self._strip_message_id and 'Message-ID' in email_message.message().keys():
+            message_string = re.sub(r"Message-ID: <.*>\n", "", message_string)
+
         try:
             r = requests.\
                 post(self._api_url + "messages.mime",
@@ -64,7 +73,7 @@ class MailgunBackend(BaseEmailBackend):
                             "from": from_email,
                          },
                      files={
-                            "message": StringIO(email_message.message().as_string()),
+                            "message": StringIO(message_string),
                          }
                      )
         except:
